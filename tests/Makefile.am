@@ -143,6 +143,7 @@ unit_tests_sources = \
   systems/equation_systems_test.C \
   systems/periodic_bc_test.C \
   systems/disjoint_neighbor_test.C \
+  systems/nonlinear_implicit_system_test.C \
   systems/systems_test.C \
   utils/parameters_test.C \
   utils/point_locator_test.C \
