@@ -44,13 +44,21 @@ namespace libMesh
 class ResidualContext
 {
 public:
-  ResidualContext(PetscNonlinearSolver<Number> * solver_in, NonlinearImplicitSystem & sys_in) :
+  ResidualContext(PetscNonlinearSolver<Number> * solver_in,
+                  NonlinearImplicitSystem & sys_in,
+                  bool constrained_in) :
       solver(solver_in),
-      sys(sys_in)
+      sys(sys_in),
+      constrained(constrained_in)
     {}
 
   PetscNonlinearSolver<Number> * solver;
   NonlinearImplicitSystem & sys;
+
+  // Whether exact constraint enforcement modified current_local_solution
+  // before the residual evaluation.  The same on every processor:
+  // n_constrained_dofs() is a global sum.
+  const bool constrained;
 };
 
 ResidualContext
@@ -94,10 +102,16 @@ libmesh_petsc_snes_residual_helper (SNES snes, Vec x, void * ctx)
   // current_local_solution.  This is the solution vector that is
   // actually used in the computation of the residual below, and is
   // not locked by debug-enabled PETSc the way that "x" is.
+  bool constrained = false;
+#ifdef LIBMESH_ENABLE_CONSTRAINTS
   if (solver->_exact_constraint_enforcement)
+    constrained = (sys.get_dof_map().n_constrained_dofs() > 0);
+#endif
+
+  if (constrained)
     sys.get_dof_map().enforce_constraints_exactly(sys, sys.current_local_solution.get());
 
-  return ResidualContext(solver, sys);
+  return ResidualContext(solver, sys, constrained);
 }
 
 //--------------------------------------------------------------------
@@ -196,6 +210,9 @@ extern "C"
           *rc.sys.current_local_solution.get(), &R, &jac, rc.sys);
 
       jac.close();
+      // The Jacobian's enforcement keeps its gate on the flag, as in the
+      // Jacobian callback; only the residual's update and enforcement
+      // below follow rc.constrained.
       if (rc.solver->_exact_constraint_enforcement)
         {
           rc.sys.get_dof_map().enforce_constraints_on_jacobian(rc.sys, &jac);
@@ -207,17 +224,23 @@ extern "C"
       libmesh_error_msg("Error! Unable to compute residual and/or Jacobian!");
 
 
-    // Synchronize PETSc x to local solution since the local solution may be changed due to the constraints
-    PetscVector<Number> & X_sys = *cast_ptr<PetscVector<Number> *>(rc.sys.solution.get());
-    PetscVector<Number> X_global(x, rc.sys.comm());
+    // Synchronize PETSc x to local solution: the exact constraint
+    // enforcement changed the local solution, and
+    // enforce_constraints_on_residual must see the unconstrained x.
+    // Without constraints the local solution still holds x.
+    if (rc.constrained)
+      {
+        PetscVector<Number> & X_sys = *cast_ptr<PetscVector<Number> *>(rc.sys.solution.get());
+        PetscVector<Number> X_global(x, rc.sys.comm());
 
-    X_global.swap(X_sys);
-    rc.sys.update();
-    X_global.swap(X_sys);
+        X_global.swap(X_sys);
+        rc.sys.update();
+        X_global.swap(X_sys);
+      }
 
     R.close();
 
-    if (rc.solver->_exact_constraint_enforcement)
+    if (rc.constrained)
       {
         rc.sys.get_dof_map().enforce_constraints_on_residual(rc.sys, &R, rc.sys.current_local_solution.get());
         R.close();
@@ -252,17 +275,23 @@ extern "C"
     else
       libmesh_error_msg("Error! Unable to compute residual for forming finite difference Jacobian!");
 
-    // Synchronize PETSc x to local solution since the local solution may be changed due to the constraints
-    PetscVector<Number> & X_sys = *cast_ptr<PetscVector<Number> *>(rc.sys.solution.get());
-    PetscVector<Number> X_global(x, rc.sys.comm());
+    // Synchronize PETSc x to local solution: the exact constraint
+    // enforcement changed the local solution, and
+    // enforce_constraints_on_residual must see the unconstrained x.
+    // Without constraints the local solution still holds x.
+    if (rc.constrained)
+      {
+        PetscVector<Number> & X_sys = *cast_ptr<PetscVector<Number> *>(rc.sys.solution.get());
+        PetscVector<Number> X_global(x, rc.sys.comm());
 
-    X_global.swap(X_sys);
-    rc.sys.update();
-    X_global.swap(X_sys);
+        X_global.swap(X_sys);
+        rc.sys.update();
+        X_global.swap(X_sys);
+      }
 
     R.close();
 
-    if (rc.solver->_exact_constraint_enforcement)
+    if (rc.constrained)
       {
         rc.sys.get_dof_map().enforce_constraints_on_residual(rc.sys, &R, rc.sys.current_local_solution.get());
         R.close();
@@ -299,17 +328,23 @@ extern "C"
       libmesh_error_msg("Error! Unable to compute residual for forming finite differenced"
                         "Jacobian-vector products!");
 
-    // Synchronize PETSc x to local solution since the local solution may be changed due to the constraints
-    PetscVector<Number> & X_sys = *cast_ptr<PetscVector<Number> *>(rc.sys.solution.get());
-    PetscVector<Number> X_global(x, rc.sys.comm());
+    // Synchronize PETSc x to local solution: the exact constraint
+    // enforcement changed the local solution, and
+    // enforce_constraints_on_residual must see the unconstrained x.
+    // Without constraints the local solution still holds x.
+    if (rc.constrained)
+      {
+        PetscVector<Number> & X_sys = *cast_ptr<PetscVector<Number> *>(rc.sys.solution.get());
+        PetscVector<Number> X_global(x, rc.sys.comm());
 
-    X_global.swap(X_sys);
-    rc.sys.update();
-    X_global.swap(X_sys);
+        X_global.swap(X_sys);
+        rc.sys.update();
+        X_global.swap(X_sys);
+      }
 
     R.close();
 
-    if (rc.solver->_exact_constraint_enforcement)
+    if (rc.constrained)
       {
         rc.sys.get_dof_map().enforce_constraints_on_residual(rc.sys, &R, rc.sys.current_local_solution.get());
         R.close();
